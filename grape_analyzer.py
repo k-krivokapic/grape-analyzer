@@ -9,7 +9,7 @@ from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
 sam = sam_model_registry["vit_h"](checkpoint="sam_vit_h_4b8939.pth")
 mask_generator = SamAutomaticMaskGenerator(sam)
 
-# 
+# method to analyze grape color in an image
 def analyze_grape(image_path, output_csv="grape_analysis.csv"):
     # load image
     image = cv2.imread(image_path)
