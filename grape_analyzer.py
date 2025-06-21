@@ -2,12 +2,17 @@ import cv2
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import streamlit as st
 from datetime import datetime
 from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
 
 # initialize the SAM model
-sam = sam_model_registry["vit_h"](checkpoint="sam_vit_h_4b8939.pth")
-mask_generator = SamAutomaticMaskGenerator(sam)
+@st.cache_resource
+def load_sam():
+    sam = sam_model_registry["vit_h"](checkpoint="sam_vit_h_4b8939.pth")
+    return SamAutomaticMaskGenerator(sam)
+
+sam = load_sam()
 
 # method to analyze grape color in an image
 def analyze_grape(image_path, output_csv="grape_analysis.csv"):
@@ -53,9 +58,19 @@ def analyze_grape(image_path, output_csv="grape_analysis.csv"):
     
     updated_data.to_csv(output_csv, index=False)
     
-    return {
-        "mask": mask,
-        "avg_hue": avg_hue,
-        "avg_saturation": avg_saturation,
-        "avg_value": avg_value
-    }
+    return mask, avg_hue
+
+# streamlit UI
+st.title("Grape Color Analyzer")
+st.markdown("Upload images to analyze color changes over time!")
+
+uploaded_file = st.file_uploader("Choose a grape image:", type=["jpg", "png", "jpeg"])
+
+if uploaded_file:
+    st.image(uploaded_file, caption="Uploaded Image", use_column_width=True)
+    
+    with st.spinner("Analyzing..."):
+        mask, avg_hue = analyze_grape(uploaded_file)
+        
+    st.success(f"Average Hue: `{avg_hue:.2f}`")
+    st.image(mask * 255, caption="Segmentation Mask", clamp=True)

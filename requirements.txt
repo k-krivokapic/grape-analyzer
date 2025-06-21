@@ -1,0 +1,5 @@
+streamlit>=1.22
+opencv-python>=4.7
+segment-anything>=1.0
+pandas>=1.5
+matplotlib>=3.6
