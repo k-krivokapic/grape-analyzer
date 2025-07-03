@@ -3,3 +3,4 @@ opencv-python>=4.7
 segment-anything>=1.0
 pandas>=1.5
 matplotlib>=3.6
+gdown>=4.6.0

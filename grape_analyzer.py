@@ -3,12 +3,18 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import streamlit as st
+import os
+import gdown
 from datetime import datetime
 from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
 
 # initialize the SAM model
 @st.cache_resource
 def load_sam():
+    if not os.path.exists("sam_vit_b_01ec64.pth"):
+        url = "https://drive.google.com/uc?id=1YrB2yH9QZf7z-5QZQJQjQ5QZQJQjQ5QZQ"
+        gdown.download(url, "sam_vit_b_01ec64.pth", quiet=False)
+    
     sam = sam_model_registry["vit_b"](checkpoint="sam_vit_b_01ec64.pth")
     return SamAutomaticMaskGenerator(sam)
 
