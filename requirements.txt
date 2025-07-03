@@ -1,6 +1,15 @@
-streamlit>=1.22
-opencv-python>=4.7
-segment-anything>=1.0
-pandas>=1.5
-matplotlib>=3.6
-gdown>=4.6.0
+# Core packages
+streamlit==1.28.0
+opencv-python-headless==4.8.0.76  # Headless version for server deployment
+numpy==1.23.5  # OpenCV dependency
+
+# SAM (Segment Anything Model)
+torch==2.0.1+cpu --index-url https://download.pytorch.org/whl/cpu  # CPU-only PyTorch
+torchvision==0.15.2+cpu --index-url https://download.pytorch.org/whl/cpu
+segment-anything==1.0
+git+https://github.com/facebookresearch/segment-anything.git  # SAM source
+
+# Additional utilities
+matplotlib==3.7.2  # For plotting
+pandas==2.0.3  # For CSV logging
+tqdm==4.66.1  # Progress bars (used by SAM)
