@@ -1,97 +1,128 @@
 import cv2
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import streamlit as st
 import os
-import gdown
 import torch
 from datetime import datetime
 from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
 
-# initialize the SAM model
+# Initialize SAM model (with enhanced error handling)
 MODEL_URL = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
 MODEL_PATH = "sam_vit_b_01ec64.pth"
 MODEL_TYPE = "vit_b"
 
 @st.cache_resource
 def load_sam():
-    # Download model if missing
-    if not os.path.exists(MODEL_PATH):
-        import urllib.request
-        with st.spinner("Downloading SAM model (375MB)..."):
-            urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
-    
-    # Verify download
-    if os.path.getsize(MODEL_PATH) < 300_000_000:  # ~300MB minimum
-        st.error("Model download failed or incomplete. Please try again.")
-        st.stop()
+    try:
+        # Download model if missing
+        if not os.path.exists(MODEL_PATH):
+            with st.spinner("Downloading SAM model (375MB)..."):
+                import urllib.request
+                urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
+            
+            # Verify download
+            if os.path.getsize(MODEL_PATH) < 300_000_000:
+                st.error("Model download failed - file too small")
+                st.stop()
         
-    # Load with device auto-detection
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    sam = sam_model_registry[MODEL_TYPE](checkpoint=MODEL_PATH).to(device)
-    return SamAutomaticMaskGenerator(sam)
+        # Load model with explicit device handling
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        if device == "cuda":
+            torch.cuda.empty_cache()  # Clear GPU memory
+            
+        sam = sam_model_registry[MODEL_TYPE](checkpoint=MODEL_PATH).to(device)
+        return SamAutomaticMaskGenerator(sam)
+    
+    except Exception as e:
+        st.error(f"Model loading failed: {str(e)}")
+        st.stop()
 
 sam = load_sam()
 
-# method to analyze grape color in an image
-def analyze_grape(image_path, output_csv="grape_analysis.csv"):
-    # load image
-    file_bytes = np.frombuffer(uploaded_file.read(), np.uint8)
-    image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    
-    # generate masks
-    masks = sam.generate(image_rgb)
-    if not masks:
-        print("no masks found!")
-        return
-    
-    # get the largest mask (the grape)
-    largest_mask = sorted(masks, key=lambda x: x['area'], reverse=True)[0]
-    mask = largest_mask['segmentation'].astype("uint8")
-    
-    # get the hsv grape color values
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    grape_hsv = cv2.bitwise_and(hsv, hsv, mask=mask)
-    
-    # calculate average color
-    avg_hue = np.mean(grape_hsv[:, :, 0][mask > 0])
-    avg_saturation = np.mean(grape_hsv[:, :, 1][mask > 0])
-    avg_value = np.mean(grape_hsv[:, :, 2][mask > 0])
-    
-    # save to csv
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    new_data = pd.DataFrame({
-        "Timestamp": [timestamp],
-        "Avg_Hue": [avg_hue],
-        "Avg_Saturation": [avg_saturation],
-        "Avg_Value": [avg_value],
-        "Image_Path": [image_path]
-    })
-    
-    # append to existing CSV or create new
+def analyze_grape(uploaded_file):
     try:
-        existing_data = pd.read_csv(output_csv)
-        updated_data = pd.concat([existing_data, new_data], ignore_index=True)
-    except FileNotFoundError:
-        updated_data = new_data
-    
-    updated_data.to_csv(output_csv, index=False)
-    
-    return mask, avg_hue
+        # Reset file pointer and decode image
+        uploaded_file.seek(0)
+        file_bytes = np.frombuffer(uploaded_file.read(), np.uint8)
+        img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+        
+        if img is None:
+            st.error("Failed to decode image")
+            return None, None
 
-# streamlit UI
-st.title("Grape Color Analyzer")
-st.markdown("Upload images to analyze color changes over time!")
+        # Convert to RGB for SAM
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        
+        # Generate masks with timeout protection
+        try:
+            masks = sam.generate(img_rgb)
+        except RuntimeError as e:
+            if "CUDA out of memory" in str(e):
+                st.warning("GPU memory full - retrying with CPU")
+                torch.cuda.empty_cache()
+                sam.model.to('cpu')
+                masks = sam.generate(img_rgb)
+            else:
+                raise e
+                
+        if not masks:
+            st.warning("No grape detected in image")
+            return None, None
 
-uploaded_file = st.file_uploader("Choose a grape image:", type=["jpg", "png", "jpeg"])
+        # Process largest mask
+        mask = max(masks, key=lambda x: x["area"])["segmentation"]
+        mask = mask.astype(np.uint8)
+        
+        # Calculate color metrics
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        avg_hue = np.mean(hsv[:, :, 0][mask > 0])
+        
+        # Save results
+        save_to_csv(uploaded_file.name, avg_hue)
+        
+        return mask, avg_hue
+        
+    except Exception as e:
+        st.error(f"Analysis failed: {str(e)}")
+        return None, None
+
+def save_to_csv(image_name, avg_hue):
+    try:
+        new_row = pd.DataFrame({
+            "Timestamp": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
+            "Image": [image_name],
+            "Hue": [avg_hue]
+        })
+        
+        if os.path.exists("results.csv"):
+            history = pd.read_csv("results.csv")
+            new_row = pd.concat([history, new_row])
+            
+        new_row.to_csv("results.csv", index=False)
+    except Exception as e:
+        st.error(f"Failed to save results: {str(e)}")
+
+# Streamlit UI
+st.title("🍇 Grape Color Analyzer")
+uploaded_file = st.file_uploader("Upload grape image", type=["jpg","png","jpeg"])
 
 if uploaded_file:
-    st.image(uploaded_file, caption="Uploaded Image", use_column_width=True)
+    col1, col2 = st.columns(2)
+    with col1:
+        st.image(uploaded_file, caption="Original Image", use_column_width=True)
     
     with st.spinner("Analyzing..."):
-        mask, avg_hue = analyze_grape(uploaded_file)
+        mask, hue = analyze_grape(uploaded_file)
+    
+    if mask is not None:
+        with col2:
+            st.image(mask*255, caption="Grape Mask", clamp=True)
+        st.success(f"Average Hue: {hue:.2f}")
         
-    st.success(f"Average Hue: `{avg_hue:.2f}`")
-    st.image(mask * 255, caption="Segmentation Mask", clamp=True)
+        # Show history
+        try:
+            history = pd.read_csv("results.csv")
+            st.line_chart(history, x="Timestamp", y="Hue")
+        except:
+            st.info("No history yet")
