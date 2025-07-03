@@ -12,7 +12,7 @@ from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
 @st.cache_resource
 def load_sam():
     if not os.path.exists("sam_vit_b_01ec64.pth"):
-        url = "https://drive.google.com/uc?id=1YrB2yH9QZf7z-5QZQJQjQ5QZQJQjQ5QZQ"
+        url = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
         gdown.download(url, "sam_vit_b_01ec64.pth", quiet=False)
     
     sam = sam_model_registry["vit_b"](checkpoint="sam_vit_b_01ec64.pth")
