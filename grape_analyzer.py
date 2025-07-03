@@ -3,114 +3,101 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import os
+import sys
 import torch
 from datetime import datetime
 from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
 
-# Initialize SAM model (with enhanced error handling)
+# ===== 1. ENHANCED LOGGING =====
+def log(message):
+    """Force logs to show in Streamlit Cloud"""
+    print(message, file=sys.stderr)
+    st.toast(message)
+
+# ===== 2. MODEL LOADING =====
 MODEL_URL = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
-MODEL_PATH = "sam_vit_b_01ec64.pth"
+MODEL_NAME = "sam_vit_b_01ec64.pth"
 MODEL_TYPE = "vit_b"
 
 @st.cache_resource
 def load_sam():
     try:
-        # Download model if missing
-        if not os.path.exists(MODEL_PATH):
-            with st.spinner("Downloading SAM model (375MB)..."):
-                import urllib.request
-                urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
-            
-            # Verify download
-            if os.path.getsize(MODEL_PATH) < 300_000_000:
-                st.error("Model download failed - file too small")
-                st.stop()
+        log("Starting model initialization...")
         
-        # Load model with explicit device handling
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        if device == "cuda":
-            torch.cuda.empty_cache()  # Clear GPU memory
+        # Download model if missing
+        if not os.path.exists(MODEL_NAME):
+            log(f"Downloading {MODEL_NAME}...")
+            import urllib.request
+            urllib.request.urlretrieve(MODEL_URL, MODEL_NAME)
             
-        sam = sam_model_registry[MODEL_TYPE](checkpoint=MODEL_PATH).to(device)
+            if os.path.getsize(MODEL_NAME) < 300_000_000:
+                raise ValueError("Downloaded file too small")
+
+        # Force CPU on Streamlit Cloud
+        device = "cpu"
+        log(f"Loading model to {device}...")
+        
+        sam = sam_model_registry[MODEL_TYPE](checkpoint=MODEL_NAME).to(device)
+        log("Model loaded successfully!")
         return SamAutomaticMaskGenerator(sam)
-    
+        
     except Exception as e:
-        st.error(f"Model loading failed: {str(e)}")
+        log(f"❌ Model loading failed: {str(e)}")
+        st.error(f"Model initialization error: {str(e)}")
         st.stop()
 
-sam = load_sam()
-
+# ===== 3. ANALYSIS =====
 def analyze_grape(uploaded_file):
     try:
-        # Reset file pointer and decode image
+        log("Starting analysis...")
+        
+        # Read image
         uploaded_file.seek(0)
         file_bytes = np.frombuffer(uploaded_file.read(), np.uint8)
         img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
         
         if img is None:
-            st.error("Failed to decode image")
-            return None, None
+            raise ValueError("Failed to decode image")
 
-        # Convert to RGB for SAM
+        # Convert to RGB
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        log("Image processed")
         
-        # Generate masks with timeout protection
-        try:
-            masks = sam.generate(img_rgb)
-        except RuntimeError as e:
-            if "CUDA out of memory" in str(e):
-                st.warning("GPU memory full - retrying with CPU")
-                torch.cuda.empty_cache()
-                sam.model.to('cpu')
-                masks = sam.generate(img_rgb)
-            else:
-                raise e
-                
+        # Generate masks
+        log("Generating masks...")
+        masks = sam.generate(img_rgb)
         if not masks:
-            st.warning("No grape detected in image")
-            return None, None
+            raise ValueError("No objects detected")
 
-        # Process largest mask
+        # Process mask
         mask = max(masks, key=lambda x: x["area"])["segmentation"]
         mask = mask.astype(np.uint8)
+        log("Mask created")
         
-        # Calculate color metrics
+        # Calculate metrics
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         avg_hue = np.mean(hsv[:, :, 0][mask > 0])
-        
-        # Save results
-        save_to_csv(uploaded_file.name, avg_hue)
+        log(f"Calculated hue: {avg_hue:.2f}")
         
         return mask, avg_hue
         
     except Exception as e:
-        st.error(f"Analysis failed: {str(e)}")
+        log(f"Analysis error: {str(e)}")
         return None, None
 
-def save_to_csv(image_name, avg_hue):
-    try:
-        new_row = pd.DataFrame({
-            "Timestamp": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
-            "Image": [image_name],
-            "Hue": [avg_hue]
-        })
-        
-        if os.path.exists("results.csv"):
-            history = pd.read_csv("results.csv")
-            new_row = pd.concat([history, new_row])
-            
-        new_row.to_csv("results.csv", index=False)
-    except Exception as e:
-        st.error(f"Failed to save results: {str(e)}")
+# ===== 4. STREAMLIT UI =====
+st.title("🍇 Grape Analyzer")
 
-# Streamlit UI
-st.title("🍇 Grape Color Analyzer")
+# Initialize with progress
+with st.spinner("Loading AI model..."):
+    sam = load_sam()
+
 uploaded_file = st.file_uploader("Upload grape image", type=["jpg","png","jpeg"])
 
 if uploaded_file:
     col1, col2 = st.columns(2)
     with col1:
-        st.image(uploaded_file, caption="Original Image", use_column_width=True)
+        st.image(uploaded_file, caption="Original", use_column_width=True)
     
     with st.spinner("Analyzing..."):
         mask, hue = analyze_grape(uploaded_file)
@@ -119,10 +106,5 @@ if uploaded_file:
         with col2:
             st.image(mask*255, caption="Grape Mask", clamp=True)
         st.success(f"Average Hue: {hue:.2f}")
-        
-        # Show history
-        try:
-            history = pd.read_csv("results.csv")
-            st.line_chart(history, x="Timestamp", y="Hue")
-        except:
-            st.info("No history yet")
+    else:
+        st.warning("Analysis failed - try another image")
