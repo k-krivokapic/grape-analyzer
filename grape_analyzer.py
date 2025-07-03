@@ -5,17 +5,31 @@ import matplotlib.pyplot as plt
 import streamlit as st
 import os
 import gdown
+import torch
 from datetime import datetime
 from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
 
 # initialize the SAM model
+MODEL_URL = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
+MODEL_PATH = "sam_vit_b_01ec64.pth"
+MODEL_TYPE = "vit_b"
+
 @st.cache_resource
 def load_sam():
-    if not os.path.exists("sam_vit_b_01ec64.pth"):
-        url = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
-        gdown.download(url, "sam_vit_b_01ec64.pth", quiet=False)
+    # Download model if missing
+    if not os.path.exists(MODEL_PATH):
+        import urllib.request
+        with st.spinner("Downloading SAM model (375MB)..."):
+            urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
     
-    sam = sam_model_registry["vit_b"](checkpoint="sam_vit_b_01ec64.pth")
+    # Verify download
+    if os.path.getsize(MODEL_PATH) < 300_000_000:  # ~300MB minimum
+        st.error("Model download failed or incomplete. Please try again.")
+        st.stop()
+        
+    # Load with device auto-detection
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    sam = sam_model_registry[MODEL_TYPE](checkpoint=MODEL_PATH).to(device)
     return SamAutomaticMaskGenerator(sam)
 
 sam = load_sam()
