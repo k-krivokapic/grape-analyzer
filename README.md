@@ -1,5 +1,5 @@
 # grape-analyzer
-work in progress
+A small program using SAM to analyze the color of uploaded photos of grapes using HSV. To use, clone this repositorty and run it locally.
 
 ---
 Citation:
